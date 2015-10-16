@@ -16,6 +16,7 @@
 #endif
 
 #include "XmlRpcDecl.h"
+#include "XmlRpcClientInfo.h"
 
 namespace XmlRpc {
 
@@ -57,9 +58,8 @@ namespace XmlRpc {
     static bool listen(int socket, int backlog);
 
     //! Accept a client connection request
-    static int accept(int socket);
-
-
+    //static int accept(int socket);
+    static int accept(int socket, XmlRpcClientInfo &ci);
 
     //! Connect a socket to a server (from a client)
     static bool connect(int socket, std::string& host, int port);

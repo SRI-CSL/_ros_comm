@@ -1,0 +1,379 @@
+# vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
+# Software License Agreement (BSD License)
+#
+# Copyright (c) 2017, SRI International
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+#  * Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#  * Redistributions in binary form must reproduce the above
+#    copyright notice, this list of conditions and the following
+#    disclaimer in the documentation and/or other materials provided
+#    with the distribution.
+#  * Neither the name of Willow Garage, Inc. nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+"""
+ROS Master authorization
+This class loads the rules from a file and provides functions to authorize connections
+"""
+
+from __future__ import print_function
+
+import os
+import yaml
+import socket
+import warnings
+import logging
+from itertools import chain
+from urlparse import urlparse
+
+
+def getLogger( ):
+    if getLogger.logger == None:
+        formatter = logging.Formatter('[auth][%(levelname)s] %(message)s')
+        handler = logging.StreamHandler( )
+        handler.setFormatter( formatter )
+        handler.setLevel( logging.INFO )
+        getLogger.logger = logging.getLogger( "roslaunch.auth" )
+        getLogger.logger.setLevel( logging.DEBUG )
+        getLogger.logger.addHandler( handler )
+    return getLogger.logger
+
+getLogger.logger = None
+
+
+def uri_to_ip_address_list( uri ):
+    """ Convert a URI to an IP address list
+    """
+    try:
+        parsed_uri = urlparse( uri )
+        _, _, ip_address_list = socket.gethostbyname_ex( parsed_uri.hostname )
+    except Exception as e:
+        getLogger().error( "Error: %s is not a valid URI (error=%s)" % ( uri, e.strerror ) )
+        return []
+    getLogger().debug( "uri_to_ip_address_list(%s) = %s" % ( parsed_uri.hostname, ip_address_list) )
+    return ip_address_list 
+
+
+def is_local_ip_address( ip_addr ):
+    """ Check if the address is a local address, i.e. begins with a 127
+    """
+    return True if ip_addr.startswith( "127." ) or ip_addr.startswith( "169.254." ) else False
+
+
+def is_local_uri( uri ):
+    """ Check if the URI is a local address, i.e. begins with a 127
+    """
+    return any( [ is_local_ip_address( addr ) for addr in uri_to_ip_address_list( uri ) ] )
+
+
+def is_uri_match( uri, ip_address ):
+    """ Check if uri matches IP address
+    """
+    uri_ip_address_list = uri_to_ip_address_list( uri )
+    if is_local_ip_address( ip_address ):
+        if any( [ is_local_ip_address( addr ) for addr in uri_ip_address_list ] ):
+            getLogger().debug( "is_uri_match( %s, %s ): OK (local IP address)" % ( uri, ip_address ) )
+            return True
+        else:
+            getLogger().debug( "is_uri_match( %s, %s ): No (local IP address)" % ( uri, ip_address ) )
+            return False
+    else:
+        if ip_address in uri_ip_address_list:
+            getLogger().debug( "is_uri_match( %s, %s ): OK" % ( uri, ip_address ) )
+            return True
+        else:
+            getLogger().debug( "is_uri_match( %s, %s ): No" % ( uri, ip_address ) )
+            return False
+
+
+class ROSMasterAuth():
+    """
+            publishers is a dictionary such that subscribers[topic] = list_of_subscriber_ip_addresses_for_that_topic
+            subscribers is a dictionary such that publishers[topic] = list_of_publishers_ip_addresses_for_that_topic
+            nodes is a dictionary such that nodes[node] = ip_address_for_that_node
+            ip_addresses is a set of all IP addresses from which nodes, subscribers and publishers are allowed
+            peer_pubs is a dictionary such that peer_pubs[ip_address] = set_of_publisher_ip_addresses_to_that_ip_address
+    """
+    reserved_parameters = ["/run_id", "/rosversion", "/rosdistro", "/tcp_keepalive", "/use_sim_time",
+            "/enable_statistics", "/statistics_window_min_elements", "/statistics_window_max_elements", 
+            "/statistics_window_min_size", "/statistics_window_max_size" ]
+    reserved_topics = ["/rosout", "/rosout_agg"]
+    reserved_nodes = ["/rosout"]
+
+    def __init__( self, config_file = "" ):
+        self.master = None
+        self.noverify = False
+        self.subscribers = dict()
+        self.publishers = dict()
+        self.providers = dict()
+        self.requesters = dict()
+        self.methods = dict()
+        self.nodes = dict()
+        self.peer_pubs = dict()
+        self.setters = dict()
+        self.getters = dict()
+        self.logger = getLogger()
+
+        """ Set ROS master IP address """
+        if os.environ.get( "ROS_MASTER_URI" ) != None:
+            self.master = uri_to_ip_address_list( os.environ.get( "ROS_MASTER_URI" ) )[0]
+            self.logger.info( "Setting master from ROS_MASTER_URI: %s" % self.master )
+        else:
+            raise RuntimeError( "ROS_MASTER_URI environment variable not set" )
+
+        """ ROS authorization configuration file is stored in environment variable """
+        if config_file == "":
+            if os.environ.get( "ROS_AUTH_FILE" ) != None:
+                config_file = os.environ.get( "ROS_AUTH_FILE" )
+        if config_file == "":
+            self.noverify = True
+            self.logger.warn( "Authorization configuration file not specified. Secure ROS is disabled!" )
+        elif not os.path.exists( config_file ):
+            raise RuntimeError( "Authorization configuration file %s does not exist" % config_file )
+        else:
+            self.logger.info( "Loading authorization from %s" % config_file )
+            self.load( config_file )
+
+
+    def load( self, config_file ):
+        """ Load authorization file
+        """
+        doc = None
+        try:
+            with open( config_file, "r" ) as f:
+                doc = yaml.load( f )
+        except:
+            raise ImportError( "Failed to read authorization file %s:" % config_file )
+        if doc != None:
+            if "topics" in doc.keys():
+                for k, v in doc["topics"].items():
+                    if k in self.reserved_topics:
+                        raise ImportError('Topic %s is a reserved topic!' % k )
+                    if "publishers" in v.keys():
+                        self.publishers[k] = set( v["publishers"] )
+                    else:
+                        raise ImportError('Topic %s does not have publishers!' % k )
+                    if "subscribers" in v.keys():
+                        self.subscribers[k] = set( v["subscribers"] ) | self.publishers[k]
+                    else:
+                        self.logger.warn('Topic %s does not have subscribers!' % k )
+            else:
+                raise ImportError( "Authorization file %s does not contain topics" % config_file )
+
+            if "nodes" in doc.keys():
+                for k, v in doc["nodes"].items():
+                    if k in self.reserved_nodes:
+                        raise ImportError('Topic %s is a reserved node!' % k )
+                    self.nodes[k] = set( v )
+            else:
+                self.logger.warn( "Authorization file %s does not contain nodes" % config_file )
+
+            if "services" in doc.keys():
+                for k, v in doc["services"].items():
+                    if "providers" in v.keys():
+                        self.providers[k] = set( v["providers"] )
+                    else:
+                        raise ImportError('Service %s does not have providers!' % k )
+                    if "requesters" in v.keys():
+                        self.requesters[k] = set( v["requesters"] ) | self.providers[k]
+                    else:
+                        self.logger.warn('Service %s does not have requesters!' % k )
+            else:
+                self.logger.warn( "Authorization file %s does not contain services" % config_file )
+
+            if "parameters" in doc.keys():
+                for k, v in doc["parameters"].items():
+                    if k in self.reserved_parameters:
+                        raise ImportError('Parameter %s is a reserved topic!' % k )
+                    if "setters" in v.keys():
+                        self.setters[k] = set( v["setters"] )
+                    else:
+                        raise ImportError('Parameter %s does not have setters!' % k )
+                    if "getters" in v.keys():
+                        self.getters[k] = set( v["getters"] ) | self.setters[k]
+                    else:
+                        self.logger.warn( 'Parameter %s does not have getters!' % k )
+            else:
+                self.logger.warn( "Authorization file %s does not contain parameters" % config_file )
+                pass
+        else:
+            raise ImportError( "Authorization file is empty" )
+
+        """ set pub/sub for reserved topics """
+
+        self.publishers["/rosout"] = set( ip for ips in chain( self.publishers.values(), self.subscribers.values() ) for ip in ips ) 
+        self.subscribers["/rosout"] = { self.master }
+
+        self.publishers["/rosout_agg"] = { self.master }
+        self.subscribers["/rosout_agg"] = { self.master }
+
+        """ set ip_address for reserved nodes """
+
+        self.nodes["/rosout"] = { self.master }
+
+        """ compute peer publishers for each subscriber IP addresses """
+        topics = set( self.publishers.keys() + self.subscribers.keys() )
+        self.peer_pubs = { s: set() for subs in self.subscribers.values() for s in subs }
+        for t in topics:
+            for s in self.subscribers[t]:
+                self.peer_pubs[s].update( set( self.publishers[t] ) )
+
+        """ compute all authorized ip addresses """
+
+        self.ip_addresses = set( ip for ip in chain.from_iterable( self.nodes.values() ) )
+        self.ip_addresses.update( set( ip for ip in chain.from_iterable( self.publishers.values() ) ) )
+        self.ip_addresses.update( set( ip for ip in chain.from_iterable( self.subscribers.values() ) ) )
+        self.ip_addresses.update( set( ip for ip in chain.from_iterable( self.providers.values() ) ) )
+        self.ip_addresses.update( set( ip for ip in chain.from_iterable( self.requesters.values() ) ) )
+        self.ip_addresses.update( set( ip for ip in chain.from_iterable( self.setters.values() ) ) )
+        self.ip_addresses.update( set( ip for ip in chain.from_iterable( self.getters.values() ) ) )
+
+        """ set setters/getters for reserved parameters """
+        for p in self.reserved_parameters:
+            self.setters[p] = {self.master}
+            self.getters[p] = self.ip_addresses
+        
+        self.logger.debug( "Master: %s" % self.master )
+        self.logger.debug( "Nodes:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.nodes.items() ) )
+        self.logger.debug( "Publishers:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.publishers.items() ) )
+        self.logger.debug( "Subscribers:\n%s" % "\n".join( "    %s: %s" % ( k, v ) for k, v in self.subscribers.items() ) )
+        self.logger.debug( "Peer publishers:\n%s" % "\n".join( "    %s: %s" % ( k, v ) for k, v in self.peer_pubs.items() ) )
+        self.logger.debug( "Parameter setters:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.setters.items() ) )
+        self.logger.debug( "Parameter getters:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.getters.items() ) )
+        self.logger.debug( "Service Providers:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.providers.items() ) )
+        self.logger.debug( "Service Requesters:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.requesters.items() ) )
+        self.logger.debug( "IP addresses: %s" % self.ip_addresses )
+        self.logger.debug( "==" )
+
+
+    def check_key_ip_address( self, key, ip_address, auth_ip_addresses, query, fallback = False, prefix = False ):
+        """ Check if key is present in 
+        """
+        if self.noverify == True:
+            self.logger.debug( "%s( %s, %s ): %s (noverify = True)" % ( query, key, ip_address, True ) )
+            return True 
+        try:
+            if ip_address in self.ip_addresses:
+                for key2, val2 in auth_ip_addresses.items():
+                    if key == key2:
+                        if ip_address in val2:
+                            self.logger.debug( "%s( %s, %s ): %s" % ( query, key, ip_address, "OK" ) )
+                            return True
+                        else:
+                            self.logger.debug( "%s( %s, %s ): %s (IP address not authorized)" % ( query, key, ip_address, "No" ) )
+                            return False
+                    if prefix and key.startswith( key2 ):
+                        if ip_address in val2:
+                            self.logger.debug( "%s( %s, %s ): %s (key prefix matches)" % ( query, key, ip_address, "OK" ) )
+                            return True
+                if fallback:
+                    self.logger.debug( "%s( %s, %s ): %s (key not listed)" % ( query, key, ip_address, "OK" ) )
+                else:
+                    self.logger.debug( "%s( %s, %s ): %s (key not listed)" % ( query, key, ip_address, "No" ) )
+                return fallback 
+            self.logger.debug( "%s( %s, %s ): %s (unknown IP address)" % ( query, key, ip_address, "No" ) )
+            return False
+        except:
+            self.logger.error( "Error querying %s( %s, %s )" % ( query, key, ip_address ) )
+            return False
+
+
+    def check_caller_id( self, caller_id, ip_address ):
+        """ Check if caller_id is allowed from ip_address
+                Allow caller_id if is not listed (fallback = True)
+                Return True if allowed
+        """
+        return self.check_key_ip_address( caller_id, ip_address, self.nodes, "allow_node", fallback = True )
+
+
+    def check_publisher( self, topic, ip_address ):
+        """ Check if ip_address is allowed to publish to topic 
+                Return True if allowed
+        """
+        return self.check_key_ip_address( topic, ip_address, self.publishers, "allow_publisher" )
+
+
+    def check_subscriber( self, topic, ip_address ):
+        """ Check if ip_address is allowed to publish to topic 
+                Return True if allowed
+        """
+        return self.check_key_ip_address( topic, ip_address, self.subscribers, "allow_subscriber" )
+
+
+    def check_method( self, method, ip_address ):
+        """ Check if method is allowed from ip_address
+                Allow method if it is not listed (fallback = True)
+                Return True if allowed
+        """
+        return self.check_key_ip_address( method, ip_address, self.methods, "allow_method" )
+
+
+    def check_peer_publisher_to_api( self, subscriber_uri, pub_ip_address ):
+        """ Check if pub_ip_address is a publisher to sub_ip_address
+                Return true if no verification 
+        """
+        for sub_ip_address in uri_to_ip_address_list( subscriber_uri ):
+                if self.check_key_ip_address( sub_ip_address, pub_ip_address, self.peer_pubs, "allow_peer_publisher" ):
+                        return True
+        return False
+
+
+    def check_provider( self, service, ip_address ):
+        """ Check if ip_address is allowed to provide the service 
+                Allow if service is not listed (fallback = True)
+                Return True if allowed
+        """
+        return self.check_key_ip_address( service, ip_address, self.providers, "allow_provider", fallback = True )
+
+
+    def check_requester( self, service, ip_address ):
+        """ Check if ip_address is allowed to request the service 
+                Allow if service is not listed (fallback = True)
+                Return True if allowed
+        """
+        return self.check_key_ip_address( service, ip_address, self.requesters, "allow_requester", fallback = True )
+
+
+    def check_param_setter( self, param, ip_address ):
+        """ Check if param or prefix of param is allowed to be set from ip_address
+                Allow if param is not listed (fallback = True)
+                Return True if allowed
+        """
+        return self.check_key_ip_address( param, ip_address, self.setters, "allow_set_param", fallback = True, prefix = True )
+
+
+    def check_param_getter( self, param, ip_address ):
+        """ Return true if no verification 
+        """
+        return self.check_key_ip_address( param, ip_address, self.getters, "allow_get_param", fallback = True, prefix = True )
+
+
+    def service_clients( self, service ):
+        """ Return list of authorized clients for service 
+                Allow if service is not listed (fallback = True)
+                Return True if allowed
+        """
+        if service in self.requesters.keys():
+            return list( self.requesters[service] )
+        return list( self.ip_addresses )
+

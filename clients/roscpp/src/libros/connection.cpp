@@ -472,4 +472,9 @@ std::string Connection::getRemoteString()
   return ss.str();
 }
 
+std::string Connection::getClientURI()
+{
+  return transport_->getClientURI();
+}
+
 }

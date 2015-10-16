@@ -31,6 +31,8 @@
 # POSSIBILITY OF SUCH DAMAGE.
 #
 # Revision $Id: xmlrpc.py 15336 2011-11-07 20:43:00Z kwc $
+# 
+# Modified for SROS: Aravind Sundaresan <asundaresan@gmail.com>
 
 from __future__ import print_function
 
@@ -66,6 +68,8 @@ except ImportError:
 
 import rosgraph.network
 
+from xml.dom.minidom import parseString
+
 def isstring(s):
     """Small helper version to check an object is a string in a way that works
     for both Python 2 and 3
@@ -75,11 +79,85 @@ def isstring(s):
     except NameError:
         return isinstance(s, str)
 
+count = 0
+
 class SilenceableXMLRPCRequestHandler(SimpleXMLRPCRequestHandler):
     def log_message(self, format, *args):
         if 0:
             SimpleXMLRPCRequestHandler.log_message(self, format, *args)
     
+class IPSilenceableXMLRPCRequestHandler(SilenceableXMLRPCRequestHandler):
+    logger = logging.getLogger('roslaunch.auth')            
+    secure_methods = [ "registerPublisher", "registerSubscriber", "registerService", "lookupService",
+            "unregisterPublisher", "unregisterSubscriber", "unregisterService",
+            "publisherUpdate", "requestTopic", "shutdown", "paramUpdate",
+            "lookupNode", "getPublishedTopics", "getTopicTypes", "getSystemState",
+            "deleteParam", "setParam",
+            "getParam", "searchParam", "subscribeParam", "unsubscribeParam", "hasParam", "getParamNames",
+            "getServiceClients" ]
+
+    def __init__(self, request, client_address, server):
+        self.client_ip, self.client_port = client_address 
+        self.logger.debug( "==== received XMLRPC (from %s:%s)" % ( self.client_ip, self.client_port ) )
+        SimpleXMLRPCRequestHandler.__init__(self, request, client_address, server)
+
+    def insert_multicall_client_ip( self, doc ):
+        structs = doc.getElementsByTagName("struct")
+        for s in structs:
+            try:
+                members = s.getElementsByTagName( "member" )
+                methodName = None
+                datas = None
+                for m in members:
+                    name = m.getElementsByTagName( "name" )[0].childNodes[0]
+                    value = m.getElementsByTagName( "value" )[0]
+                    if name.data == 'methodName':
+                        for v in value.childNodes:
+                            if v.nodeType == v.ELEMENT_NODE:
+                                methodName = v.childNodes[0].data
+                                self.logger.debug( "multicall: %s" % methodName )
+                                break
+                    elif name.data == 'params':
+                        arrays = value.getElementsByTagName( "array" )
+                        datas = arrays[0].getElementsByTagName( "data" )[0]
+                    else:
+                        self.logger.warn( "multicall: unexpected entry %s" % name.data )
+                if methodName in self.secure_methods:
+                    ddoc = parseString( "<value><string>%s</string></value>\n" % self.client_ip )
+                    d = ddoc.firstChild.cloneNode(True)
+                    datas.appendChild(d)
+            except:
+              self.logger.warn( "XML system.multicall parsing error" )
+
+    def decode_request_content(self, data):
+        global count 
+        count = count + 1
+        data = SimpleXMLRPCRequestHandler.decode_request_content(self, data)
+        doc = parseString(data)
+        ps = doc.getElementsByTagName("params")[0]
+        
+        methodName = doc.getElementsByTagName("methodName")[0].childNodes[0].nodeValue
+        self.logger.info( "-- %s (from %s) --" % ( methodName, self.client_ip ) )
+        fname = "none.xml"
+        if methodName == "system.multicall":
+          self.insert_multicall_client_ip( doc )
+          fname = "multi_%d.xml" % count
+        else:
+          pdoc = parseString(
+             ''' <param><value>
+                  <string>%s</string>
+                  </value></param>''' % (self.client_ip,))
+          p = pdoc.firstChild.cloneNode(True)
+          fname = "single_%d.xml" % count
+          if methodName in self.secure_methods:
+            ps.appendChild(p)
+        if 0:
+            with open( fname, "w" ) as f:
+              f.write( "%s" % doc.toxml() )
+              print( "[xmlrpc] Writing XML to %s" % fname )
+        return doc.toxml()
+
+
 class ThreadingXMLRPCServer(socketserver.ThreadingMixIn, SimpleXMLRPCServer):
     """
     Adds ThreadingMixin to SimpleXMLRPCServer to support multiple concurrent
@@ -99,7 +177,7 @@ class ThreadingXMLRPCServer(socketserver.ThreadingMixIn, SimpleXMLRPCServer):
             # We have to monipulate private members and duplicate
             # code from the constructor.
             # TODO IPV6: Get this into SimpleXMLRPCServer 
-            SimpleXMLRPCServer.__init__(self, addr, SilenceableXMLRPCRequestHandler, log_requests,  bind_and_activate=False)
+            SimpleXMLRPCServer.__init__(self, addr, IPSilenceableXMLRPCRequestHandler, log_requests,  bind_and_activate=False)
             self.address_family = socket.AF_INET6
             self.socket = socket.socket(self.address_family, self.socket_type)
             logger.info('binding ipv6 xmlrpc socket to' + str(addr))
@@ -109,7 +187,7 @@ class ThreadingXMLRPCServer(socketserver.ThreadingMixIn, SimpleXMLRPCServer):
             self.server_activate()
             logger.info('bound to ' + str(self.socket.getsockname()[0:2]))
         else:
-            SimpleXMLRPCServer.__init__(self, addr, SilenceableXMLRPCRequestHandler, log_requests)
+            SimpleXMLRPCServer.__init__(self, addr, IPSilenceableXMLRPCRequestHandler, log_requests)
 
     def handle_error(self, request, client_address):
         """
@@ -226,7 +304,7 @@ class XmlRpcNode(object):
             port = self.port or 0 #0 = any
 
             bind_address = rosgraph.network.get_bind_address()
-            logger.info("XML-RPC server binding to %s:%d" % (bind_address, port))
+            logger.info("Modified XML-RPC server binding to %s:%d" % (bind_address, port))
             
             self.server = ThreadingXMLRPCServer((bind_address, port), log_requests)
             self.port = self.server.server_address[1] #set the port to whatever server bound to
@@ -265,7 +343,6 @@ class XmlRpcNode(object):
             else:
                 msg = "ERROR: Unable to start XML-RPC server: %s" % e.strerror
             logger.error(msg)
-            print(msg)
             raise #let higher level catch this
 
         if self.handler is not None:

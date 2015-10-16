@@ -89,7 +89,8 @@ public:
 class XMLRPCManager;
 typedef boost::shared_ptr<XMLRPCManager> XMLRPCManagerPtr;
 
-typedef boost::function<void(XmlRpc::XmlRpcValue&, XmlRpc::XmlRpcValue&)> XMLRPCFunc;
+typedef boost::function<void(XmlRpc::XmlRpcValue&, XmlRpc::XmlRpcValue&)> XMLRPCFunc_deprecated;
+typedef boost::function<void(XmlRpc::XmlRpcValue&, XmlRpc::XmlRpcValue&, XmlRpc::XmlRpcClientInfo&)> XMLRPCFunc;
 
 class ROSCPP_DECL XMLRPCManager
 {
@@ -124,6 +125,7 @@ public:
   void addASyncConnection(const ASyncXMLRPCConnectionPtr& conn);
   void removeASyncConnection(const ASyncXMLRPCConnectionPtr& conn);
 
+  //bool bind(const std::string& function_name, const XMLRPCFunc_deprecated& cb);
   bool bind(const std::string& function_name, const XMLRPCFunc& cb);
   void unbind(const std::string& function_name);
 
