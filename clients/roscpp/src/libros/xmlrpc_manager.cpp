@@ -77,9 +77,10 @@ public:
   , func_(cb)
   { }
 
-  void execute(XmlRpcValue &params, XmlRpcValue &result)
+  void execute(XmlRpcValue &params, XmlRpcClientInfo &client_info, XmlRpcValue &result)
   {
-    func_(params, result);
+    //printf( "[xmlrpc_cpp] received client_info: %s\n", client_info.ip.c_str() );
+    func_(params, result, client_info);
   }
 
 private:
@@ -90,6 +91,14 @@ private:
 void getPid(const XmlRpcValue& params, XmlRpcValue& result)
 {
   (void)params;
+  result = xmlrpc::responseInt(0, "Deprecated function", 0);
+  std::cerr << "Deprecated function call in function " << __func__ << " in file " << __FILE__ << std::endl;
+}
+
+void getPid(const XmlRpcValue& params, XmlRpcValue& result, XmlRpcClientInfo& client_info)
+{
+  (void)params;
+  (void)client_info;
   result = xmlrpc::responseInt(1, "", (int)getpid());
 }
 
@@ -127,7 +136,7 @@ void XMLRPCManager::start()
 {
   shutting_down_ = false;
   port_ = 0;
-  bind("getPid", getPid);
+  bind("getPid", static_cast<void (*)(const XmlRpcValue& , XmlRpcValue& , XmlRpcClientInfo& )>(&getPid));
 
   bool bound = server_.bindAndListen(0);
   (void) bound;
@@ -386,6 +395,23 @@ void XMLRPCManager::removeASyncConnection(const ASyncXMLRPCConnectionPtr& conn)
   boost::mutex::scoped_lock lock(removed_connections_mutex_);
   removed_connections_.insert(conn);
 }
+
+//bool XMLRPCManager::bind(const std::string& function_name, const XMLRPCFunc_deprecated& cb)
+//{
+//  boost::mutex::scoped_lock lock(functions_mutex_);
+//  if (functions_.find(function_name) != functions_.end())
+//  {
+//    return false;
+//  }
+//
+//  FunctionInfo info;
+//  info.name = function_name;
+//  info.function = cb;
+//  info.wrapper.reset(new XMLRPCCallWrapper(function_name, cb, &server_));
+//  functions_[function_name] = info;
+//
+//  return true;
+//}
 
 bool XMLRPCManager::bind(const std::string& function_name, const XMLRPCFunc& cb)
 {

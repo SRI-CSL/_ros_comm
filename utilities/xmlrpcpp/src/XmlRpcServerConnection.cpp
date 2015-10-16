@@ -1,5 +1,6 @@
 
 #include "xmlrpcpp/XmlRpcServerConnection.h"
+#include "xmlrpcpp/XmlRpcClientInfo.h"
 
 #include "xmlrpcpp/XmlRpcSocket.h"
 #include "xmlrpcpp/XmlRpc.h"
@@ -259,11 +260,13 @@ bool
 XmlRpcServerConnection::executeMethod(const std::string& methodName, 
                                       XmlRpcValue& params, XmlRpcValue& result)
 {
+  XmlRpcClientInfo ci;
   XmlRpcServerMethod* method = _server->findMethod(methodName);
+  _server->findClientInfo(getfd(), ci);
 
   if ( ! method) return false;
 
-  method->execute(params, result);
+  method->execute(params, ci, result);
 
   // Ensure a valid result value
   if ( ! result.valid())

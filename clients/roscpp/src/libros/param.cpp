@@ -30,6 +30,7 @@
 #include "ros/xmlrpc_manager.h"
 #include "ros/this_node.h"
 #include "ros/names.h"
+#include "ros/topic_manager.h"
 
 #include <ros/console.h>
 
@@ -800,6 +801,21 @@ void update(const std::string& key, const XmlRpc::XmlRpcValue& v)
 
 void paramUpdateCallback(XmlRpc::XmlRpcValue& params, XmlRpc::XmlRpcValue& result)
 {
+  (void)params;
+  result = xmlrpc::responseInt(0, "Deprecated function", 0);
+  std::cerr << "Deprecated function call in function " << __func__ << " in file " << __FILE__ << std::endl;
+}
+
+void paramUpdateCallback(XmlRpc::XmlRpcValue& params, XmlRpc::XmlRpcValue& result, XmlRpc::XmlRpcClientInfo& client_info )
+{
+  std::string caller_id( params[0] );
+  std::string param_key( params[1] );
+  if ( !is_uri_match( ros::master::getURI(), client_info.ip ) ) {
+    ROS_WARN_NAMED( AUTH, "paramUpdate( %s, %s, %s ) not authorized", caller_id.c_str(), param_key.c_str(), client_info.ip.c_str() );
+    result = xmlrpc::responseInt(-1, "method not authorized", 0);
+    return;
+  }
+
   result[0] = 1;
   result[1] = std::string("");
   result[2] = 0;
@@ -874,7 +890,7 @@ void init(const M_string& remappings)
     }
   }
 
-  XMLRPCManager::instance()->bind("paramUpdate", paramUpdateCallback);
+  XMLRPCManager::instance()->bind("paramUpdate", static_cast<void (*)(XmlRpc::XmlRpcValue& , XmlRpc::XmlRpcValue& , XmlRpc::XmlRpcClientInfo& )>(&paramUpdateCallback) );
 }
 
 } // namespace param

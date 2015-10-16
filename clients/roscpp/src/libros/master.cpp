@@ -35,6 +35,8 @@
 #include <ros/assert.h>
 
 #include "xmlrpcpp/XmlRpc.h"
+#include <iostream>
+#include <sstream> 
 
 namespace ros
 {
@@ -169,6 +171,135 @@ bool getNodes(V_string& nodes)
 
   nodes.insert(nodes.end(), node_set.begin(), node_set.end());
 
+  return true;
+}
+
+std::string XmlRpcValueType( XmlRpc::XmlRpcValue& value ) {
+  std::stringstream ss;
+  if ( value.getType() == XmlRpc::XmlRpcValue::TypeBoolean ) {
+    bool v = value;
+    ss << "Boolean (" << v << ")";
+  }
+  else if ( value.getType() == XmlRpc::XmlRpcValue::TypeInt ) {
+    int v = value;
+    ss << "Int (" << v << ")";
+  }
+  else if ( value.getType() == XmlRpc::XmlRpcValue::TypeDouble ) {
+    double v = value;
+    ss << "Double (" << v << ")";
+  }
+  else if ( value.getType() == XmlRpc::XmlRpcValue::TypeString ) {
+    std::string v = value;
+    ss << "String (" << v << ")";
+  }
+  else if ( value.getType() == XmlRpc::XmlRpcValue::TypeDateTime ) {
+    ss << "DateTime";
+  }
+  else if ( value.getType() == XmlRpc::XmlRpcValue::TypeBase64 ) {
+    ss << "Base64";
+  }
+  else if ( value.getType() == XmlRpc::XmlRpcValue::TypeArray ) {
+    ss << "Array";
+  }
+  else if ( value.getType() == XmlRpc::XmlRpcValue::TypeStruct ) {
+    ss << "Struct";
+  }
+  else if ( value.getType() == XmlRpc::XmlRpcValue::TypeInvalid ) {
+    ss << "Invalid";
+  }
+  else {
+    ss << "Other";
+  }
+  return ss.str();
+}
+
+bool getSubscriberNodes(V_string& sub_nodes, const std::string topic)
+{
+  XmlRpc::XmlRpcValue args, result, payload;
+  args[0] = this_node::getName();
+
+  if (!execute("getSystemState", args, result, payload, true))
+  {
+    return false;
+  }
+
+  S_string node_set;
+  {
+    if ( payload.size() != 3 ) {
+      printf( "Expected payload size = 3 (actual is %d)\n", payload.size() );
+      std::cout << "  type: " << XmlRpcValueType( payload ) << std::endl << std::flush;
+      return false;
+    }
+    for (int j = 0; j < payload[1].size(); ++j)
+    {
+      std::string t = payload[1][j][0];
+      if ( t == topic ) {
+        XmlRpc::XmlRpcValue val = payload[1][j][1];
+        for (int k = 0; k < val.size(); ++k)
+        {
+          std::string name = payload[1][j][1][k];
+          node_set.insert(name);
+        }
+      }
+    }
+  }
+
+  sub_nodes.insert(sub_nodes.end(), node_set.begin(), node_set.end());
+
+  return true;
+}
+
+bool getSubscriberHosts(V_string& sub_hosts, const std::string topic) 
+{
+  V_string sub_nodes;
+  getSubscriberNodes( sub_nodes, topic );
+
+  S_string host_set;
+  for ( size_t i = 0; i < sub_nodes.size(); i++ ) {
+    XmlRpc::XmlRpcValue args, result, payload;
+    args[0] = this_node::getName();
+    args[1] = sub_nodes[i];
+
+    if (!execute("lookupNode", args, result, payload, true)) {
+      return false;
+    }
+    if ( payload.getType() != XmlRpc::XmlRpcValue::TypeString ) {
+      printf( "Expected payload to be string\n" );
+      std::cout << "  type: " << XmlRpcValueType( payload ) << std::endl << std::flush;
+      return false;
+    }
+    std::string uri = payload;
+    std::string host;
+    uint32_t port;
+    // Split URI into
+    if (!network::splitURI(uri, host, port)) {
+      ROS_FATAL( "Couldn't parse the URI [%s] into a host:port pair.", uri.c_str());
+      ROS_BREAK();
+    }
+    //else { 
+    //  printf( "[xmlrpc_cpp]    %s -> %s : %d\n", uri.c_str(), host.c_str(), port );
+    //}
+    host_set.insert( host );
+  }
+  sub_hosts.insert( sub_hosts.end(), host_set.begin(), host_set.end() );
+  return true;
+}
+
+
+bool getServiceClients(V_string& sub_hosts, const std::string service) 
+{
+  XmlRpc::XmlRpcValue args, result, payload;
+  args[0] = this_node::getName();
+  args[1] = service;
+
+  if (!execute("getServiceClients", args, result, payload, true)) {
+    return false;
+  }
+
+  for ( int j = 0; j < payload.size(); ++j ) {
+    std::string ip_address = payload[j];
+    sub_hosts.push_back( ip_address );
+  }
   return true;
 }
 
