@@ -1,6 +1,8 @@
 // this file modified by Morgan Quigley on 22 Apr 2008.
 // added features: server can be opened on port 0 and you can read back
 // what port the OS gave you
+// This file was modified by Aravind Sundaresan in 2017.
+// Add support for client information in the method callback
 
 #include "XmlRpcServer.h"
 #include "XmlRpcServerConnection.h"
