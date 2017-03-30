@@ -5,12 +5,14 @@
     rosgraph contains the rosgraph command-line tool, which prints
     information about the ROS Computation Graph. It also provides an
     internal library that can be used by graphical tools.
+    This version has been modified to be compatible with Secure ROS.
   </description>
-  <maintainer email="dthomas@osrfoundation.org">Dirk Thomas</maintainer>
+  <maintainer email="aravind@ai.sri.com">Aravind Sundaresan</maintainer>
   <license>BSD</license>
 
   <url>http://ros.org/wiki/rosgraph</url>
   <author>Ken Conley</author>
+  <author>Aravind Sundaresan</author>
 
   <buildtool_depend version_gte="0.5.78">catkin</buildtool_depend>
 

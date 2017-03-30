@@ -6,14 +6,16 @@
     heavily modified from the package available on SourceForge in order to
     support roscpp's threading model. As such, we are maintaining our
     own fork.
+    This version has been modified to be compatible with Secure ROS.
   </description>
-  <maintainer email="dthomas@osrfoundation.org">Dirk Thomas</maintainer>
+  <maintainer email="aravind@ai.sri.com">Aravind Sundaresan</maintainer>
   <license>LGPL-2.1</license>
 
   <url>http://xmlrpcpp.sourceforge.net</url>
   <author>Chris Morley</author>
   <author>Konstantin Pilipchuk</author>
   <author>Morgan Quigley</author>
+  <author>Aravind Sundaresan</author>
 
   <buildtool_depend>catkin</buildtool_depend>
 

@@ -1,3 +1,5 @@
+// This file was modified by Aravind Sundaresan in 2017.
+// Add support for client information in the method callback
 
 #include "xmlrpcpp/XmlRpcServerConnection.h"
 #include "xmlrpcpp/XmlRpcClientInfo.h"
