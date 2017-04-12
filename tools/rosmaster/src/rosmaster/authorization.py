@@ -43,8 +43,10 @@ import yaml
 import socket
 import warnings
 import logging
+import rospkg
 from itertools import chain
 from urlparse import urlparse
+from collections import OrderedDict
 
 
 def getLogger( ):
@@ -112,7 +114,7 @@ class ROSMasterAuth():
             subscribers is a dictionary such that publishers[topic] = list_of_publishers_ip_addresses_for_that_topic
             nodes is a dictionary such that nodes[node] = ip_address_for_that_node
             ip_addresses is a set of all IP addresses from which nodes, subscribers and publishers are allowed
-            peer_pubs is a dictionary such that peer_pubs[ip_address] = set_of_publisher_ip_addresses_to_that_ip_address
+            peer_publishers is a dictionary such that peer_publishers[ip_address] = set_of_publisher_ip_addresses_to_that_ip_address
     """
     reserved_parameters = ["/run_id", "/rosversion", "/rosdistro", "/tcp_keepalive", "/use_sim_time",
             "/enable_statistics", "/statistics_window_min_elements", "/statistics_window_max_elements", 
@@ -129,7 +131,7 @@ class ROSMasterAuth():
         self.requesters = dict()
         self.methods = dict()
         self.nodes = dict()
-        self.peer_pubs = dict()
+        self.peer_publishers = dict()
         self.setters = dict()
         self.getters = dict()
         self.logger = getLogger()
@@ -153,6 +155,9 @@ class ROSMasterAuth():
         else:
             self.logger.info( "Loading authorization from %s" % config_file )
             self.load( config_file )
+        output_file = "%s/ros_auth_full.yaml" % rospkg.get_log_dir( env = os.environ )
+        self.logger.info( "Writing full authorization to %s" % output_file )
+        self.save( output_file )
 
 
     def load( self, config_file ):
@@ -233,10 +238,10 @@ class ROSMasterAuth():
 
         """ compute peer publishers for each subscriber IP addresses """
         topics = set( self.publishers.keys() + self.subscribers.keys() )
-        self.peer_pubs = { s: set() for subs in self.subscribers.values() for s in subs }
+        self.peer_publishers = { s: set() for subs in self.subscribers.values() for s in subs }
         for t in topics:
             for s in self.subscribers[t]:
-                self.peer_pubs[s].update( set( self.publishers[t] ) )
+                self.peer_publishers[s].update( set( self.publishers[t] ) )
 
         """ compute all authorized ip addresses """
 
@@ -257,13 +262,33 @@ class ROSMasterAuth():
         self.logger.debug( "Nodes:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.nodes.items() ) )
         self.logger.debug( "Publishers:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.publishers.items() ) )
         self.logger.debug( "Subscribers:\n%s" % "\n".join( "    %s: %s" % ( k, v ) for k, v in self.subscribers.items() ) )
-        self.logger.debug( "Peer publishers:\n%s" % "\n".join( "    %s: %s" % ( k, v ) for k, v in self.peer_pubs.items() ) )
+        self.logger.debug( "Peer publishers:\n%s" % "\n".join( "    %s: %s" % ( k, v ) for k, v in self.peer_publishers.items() ) )
         self.logger.debug( "Parameter setters:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.setters.items() ) )
         self.logger.debug( "Parameter getters:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.getters.items() ) )
         self.logger.debug( "Service Providers:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.providers.items() ) )
         self.logger.debug( "Service Requesters:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.requesters.items() ) )
         self.logger.debug( "IP addresses: %s" % self.ip_addresses )
         self.logger.debug( "==" )
+
+
+    def save( self, filename ):
+        """ Write full authorization configuration to YAML file
+        """
+        data = OrderedDict()
+        data.update( {"master": self.master } )
+        data.update( {"nodes": { k: list( v ) for k, v in self.nodes.items() } } )
+        data.update( {"publishers": { k: list( v ) for k, v in self.publishers.items() } } )
+        data.update( {"subscribers": { k: list( v ) for k, v in self.subscribers.items() } } )
+        data.update( {"peer_publishers": { k: list( v ) for k, v in self.peer_publishers.items() } } )
+        data.update( {"setters": { k: list( v ) for k, v in self.setters.items() } } )
+        data.update( {"getters": { k: list( v ) for k, v in self.getters.items() } } )
+        data.update( {"providers": { k: list( v ) for k, v in self.providers.items() } } )
+        data.update( {"requesters": { k: list( v ) for k, v in self.requesters.items() } } )
+        data.update( {"ip_addresses": list( self.ip_addresses ) } )
+        represent_dict_order = lambda self, data:  self.represent_mapping('tag:yaml.org,2002:map', data.items())
+        yaml.add_representer(OrderedDict, represent_dict_order)    
+        with open( filename, "w" ) as handle:
+            yaml.dump( data, handle )
 
 
     def check_key_ip_address( self, key, ip_address, auth_ip_addresses, query, fallback = False, prefix = False ):
@@ -333,7 +358,7 @@ class ROSMasterAuth():
                 Return true if no verification 
         """
         for sub_ip_address in uri_to_ip_address_list( subscriber_uri ):
-                if self.check_key_ip_address( sub_ip_address, pub_ip_address, self.peer_pubs, "allow_peer_publisher" ):
+                if self.check_key_ip_address( sub_ip_address, pub_ip_address, self.peer_publishers, "allow_peer_publisher" ):
                         return True
         return False
 
