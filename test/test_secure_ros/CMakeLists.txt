@@ -34,4 +34,6 @@ catkin_install_python( PROGRAMS
   nodes/listener.py 
   nodes/talker.py 
   nodes/test_authorization.py 
+  nodes/rosxmlrpc.py 
+  nodes/test_self.py 
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
