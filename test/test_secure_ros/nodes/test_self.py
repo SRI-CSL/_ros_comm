@@ -74,22 +74,27 @@ def get_authorized( ip_addr, auth_file ):
   auth.save( auth_file2 )
   auth_list["published_topics"] = set( t for (t,ip_set) in auth.publishers.items() if ip_addr in ip_set )
   auth_list["subscribed_topics"] = set( t for (t,ip_set) in auth.subscribers.items() if ip_addr in ip_set )
-  auth_list["topics"] = auth_list["published_topics"].union( auth_list["subscribed_topics"] )
+  auth_list["state"] = { }
+  auth_list["state"]["published_topics"] = set( t for (t,ip_set) in auth.publishers.items() if ip_addr in ip_set | {auth.master} )
+  auth_list["state"]["subscribed_topics"] = set( t for (t,ip_set) in auth.subscribers.items() if ip_addr in ip_set | {auth.master} )
+  auth_list["state"]["published_topics"] -= {"/rosout_agg"}
+
   return auth_list
 
 
 
 class Tester():
-  def __init__( self, ip_addr, auth_file ):
-    self.results = {}
+  def __init__( self, master_uri, ip_addr, auth_file ):
     self.logger = getLogger()
-    self.master_uri = os.environ.get( "ROS_MASTER_URI" )
+    self.logger.info( "ROS Master: %s" % master_uri )
+    self.logger.info( "IP addr: %s" % ip_addr )
+    self.logger.info( "Authorization configuration file: %s" % auth_file )
+    self.results = {}
+    self.master_uri = master_uri
     self.ip_addr = ip_addr
     self.auth_list = get_authorized( ip_addr, auth_file )
     self.client = xmlrpclib.ServerProxy( self.master_uri )
     self.caller_id = "tester" 
-    self.logger.info( "IP addr: %s" % ip_addr )
-    self.logger.info( "ROS Master: %s" % self.master_uri )
 
 
   def call( self, method_name, args ):
@@ -144,37 +149,44 @@ class Tester():
     method = "getPublishedTopics"
     val = self.test_method( method, ("",) )
     topics = set( v[0] for v in val )
-    self.check_test_equal( method, topics, self.auth_list["topics"], "topics" )
+    self.check_test_equal( method, topics, self.auth_list["subscribed_topics"], "topics" )
 
     """ """
     method = "getTopicTypes"
     val = self.test_method( method )
     topics = set( v[0] for v in val )
-    self.check_test_equal( method, topics, self.auth_list["topics"], "topics" )
+    self.check_test_equal( method, topics, self.auth_list["subscribed_topics"], "topics" )
 
     """ """
     success = True
     method = "getSystemState"
     publishers, subscribers, services = self.test_method( method )
-    pub_topics = set( v[0] for v in publishers )
-    self.check_test_equal( method, pub_topics, self.auth_list["published_topics"], "published_topics" )
     sub_topics = set( v[0] for v in subscribers )
-    self.check_test_equal( method, sub_topics, self.auth_list["subscribed_topics"], "subscribed_topics" )
+    self.check_test_equal( method, sub_topics, self.auth_list["state"]["published_topics"], "published_topics" )
+    pub_topics = set( v[0] for v in publishers )
+    self.check_test_equal( method, pub_topics, self.auth_list["state"]["subscribed_topics"], "subscribed_topics" )
     """ """
 
 
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument( "--auth_file", "-a", type = str, help="Authorization file" )
-  parser.add_argument( "--ip_addr", "-i", type = str, help = 'IP address' )
+  parser.add_argument( "--auth_file", "-a", type = str, default = os.environ.get( "ROS_AUTH_FILE" ), help="Authorization file" )
+  parser.add_argument( "--master_uri", "-M", type = str, default = os.environ.get( "ROS_MASTER_URI" ), help = 'Master URI' )
+  parser.add_argument( "--ip_addr", "-I", type = str, default = os.environ.get( "ROS_IP" ), help = 'IP address' )
   args = parser.parse_args()
-  auth_file = os.path.realpath( args.auth_file )
   if args.ip_addr == None:
-    print( "Please specify IP address of this machine" )
+    print( "Unable to obtain IP address. Please use the -I option to specify IP address of this machine." )
+    exit()
+  if args.auth_file == None:
+    print( "Unable to obtain authorization file. Please use the -a option to specify configuration file." )
+    exit()
+  elif not os.path.exists( args.auth_file ):
+    print( "Authorization file (%s) does not exist. Please use the -a option to specify configuration file." % args.auth_file )
     exit()
 
-  tester = Tester( args.ip_addr, auth_file )
+  auth_file = os.path.realpath( args.auth_file )
+  tester = Tester( args.master_uri, args.ip_addr, auth_file )
   tester.test_topics()
   tester.print_results()
 
