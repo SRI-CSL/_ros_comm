@@ -63,6 +63,36 @@ def getLogger( ):
 getLogger.logger = None
 
 
+def resolve_ip_address( ip_address ):
+    """ Convert host or IP address to a list of IP addresses """
+    try: 
+        _, _, ip_address_list = socket.gethostbyname_ex( ip_address )
+    except socket.gaierror as e:
+        msg = "A %s exception occurred (%s)" % ( type(e).__name__, ", ".join( "%s" % a for a in e.args ) )
+        getLogger().error( msg )
+        msg = "Unable to resolve hostname: %s" % ( ip_address )
+        getLogger().error( msg )
+        raise ImportError( msg )
+    except Exception as e:
+        msg = "A %s exception occurred (%s)" % ( type(e).__name__, ", ".join( "%s" % a for a in e.args ) )
+        getLogger().error( msg )
+        raise e
+    getLogger().debug( "%s resolved to %s" % ( ip_address, set( ip_address_list ) ) )
+    return set( ip_address_list )
+
+
+
+def resolve_ip_address_list( ip_address_list, aliases = dict() ):
+    ip_address_set = set()
+    for ip in ip_address_list:
+        if ip in aliases.keys():
+            ip_address_set.update( aliases[ip] )
+        else:
+            ip_address_set.update( resolve_ip_address( ip ) )
+    return ip_address_set 
+        
+
+
 def uri_to_ip_address_list( uri ):
     """ Convert a URI to an IP address list
     """
@@ -123,8 +153,9 @@ class ROSMasterAuth():
     reserved_nodes = ["/rosout"]
 
     def __init__( self, config_file = "" ):
-        self.master = None
         self.noverify = False
+        self.master = set()
+        self.aliases = dict()
         self.subscribers = dict()
         self.publishers = dict()
         self.providers = dict()
@@ -134,18 +165,20 @@ class ROSMasterAuth():
         self.peer_publishers = dict()
         self.setters = dict()
         self.getters = dict()
+        self.ip_addresses = set()
         self.logger = getLogger()
 
         """ Set ROS master IP address """
-        if os.environ.get( "ROS_MASTER_URI" ) != None:
-            self.master = uri_to_ip_address_list( os.environ.get( "ROS_MASTER_URI" ) )[0]
+        if os.environ.has_key( "ROS_MASTER_URI" ):
+            self.master = set( uri_to_ip_address_list( os.environ.get( "ROS_MASTER_URI" ) ) )
+            self.master.update( resolve_ip_address( "localhost" ) )
             self.logger.info( "Setting master from ROS_MASTER_URI: %s" % self.master )
         else:
             raise RuntimeError( "ROS_MASTER_URI environment variable not set" )
 
         """ ROS authorization configuration file is stored in environment variable """
         if config_file == "":
-            if os.environ.get( "ROS_AUTH_FILE" ) != None:
+            if os.environ.has_key( "ROS_AUTH_FILE" ):
                 config_file = os.environ.get( "ROS_AUTH_FILE" )
         if config_file == "":
             self.noverify = True
@@ -160,6 +193,12 @@ class ROSMasterAuth():
         self.save( output_file )
 
 
+    def resolve( self, ip_address_list ):
+        """ Resolve ip_address_list where each ip_address may be an IP address, Host name or alias
+        """
+        return resolve_ip_address_list( ip_address_list, self.aliases )
+
+
     def load( self, config_file ):
         """ Load authorization file
         """
@@ -170,16 +209,20 @@ class ROSMasterAuth():
         except:
             raise ImportError( "Failed to read authorization file %s:" % config_file )
         if doc != None:
+            if "aliases" in doc.keys():
+                for key, val in doc["aliases"].items():
+                    self.aliases[key] = resolve_ip_address_list( val )
+                self.aliases = doc["aliases"]
             if "topics" in doc.keys():
                 for k, v in doc["topics"].items():
                     if k in self.reserved_topics:
                         raise ImportError('Topic %s is a reserved topic!' % k )
                     if "publishers" in v.keys():
-                        self.publishers[k] = set( v["publishers"] )
+                        self.publishers[k] = self.resolve( v["publishers"] ) 
                     else:
                         raise ImportError('Topic %s does not have publishers!' % k )
                     if "subscribers" in v.keys():
-                        self.subscribers[k] = set( v["subscribers"] ) | self.publishers[k]
+                        self.subscribers[k] = self.resolve( v["subscribers"] ) | self.publishers[k]
                     else:
                         self.logger.warn('Topic %s does not have subscribers!' % k )
             else:
@@ -189,18 +232,18 @@ class ROSMasterAuth():
                 for k, v in doc["nodes"].items():
                     if k in self.reserved_nodes:
                         raise ImportError('Topic %s is a reserved node!' % k )
-                    self.nodes[k] = set( v )
+                    self.nodes[k] = self.resolve( v )
             else:
                 self.logger.warn( "Authorization file %s does not contain nodes" % config_file )
 
             if "services" in doc.keys():
                 for k, v in doc["services"].items():
                     if "providers" in v.keys():
-                        self.providers[k] = set( v["providers"] )
+                        self.providers[k] = self.resolve( v["providers"] )
                     else:
                         raise ImportError('Service %s does not have providers!' % k )
                     if "requesters" in v.keys():
-                        self.requesters[k] = set( v["requesters"] ) | self.providers[k]
+                        self.requesters[k] = self.resolve( v["requesters"] ) | self.providers[k]
                     else:
                         self.logger.warn('Service %s does not have requesters!' % k )
             else:
@@ -211,11 +254,11 @@ class ROSMasterAuth():
                     if k in self.reserved_parameters:
                         raise ImportError('Parameter %s is a reserved topic!' % k )
                     if "setters" in v.keys():
-                        self.setters[k] = set( v["setters"] )
+                        self.setters[k] = self.resolve( v["setters"] )
                     else:
                         raise ImportError('Parameter %s does not have setters!' % k )
                     if "getters" in v.keys():
-                        self.getters[k] = set( v["getters"] ) | self.setters[k]
+                        self.getters[k] = self.resolve( v["getters"] ) | self.setters[k]
                     else:
                         self.logger.warn( 'Parameter %s does not have getters!' % k )
             else:
@@ -227,14 +270,14 @@ class ROSMasterAuth():
         """ set pub/sub for reserved topics """
 
         self.publishers["/rosout"] = set( ip for ips in chain( self.publishers.values(), self.subscribers.values() ) for ip in ips ) 
-        self.subscribers["/rosout"] = { self.master }
+        self.subscribers["/rosout"] = self.master 
 
-        self.publishers["/rosout_agg"] = { self.master }
-        self.subscribers["/rosout_agg"] = { self.master }
+        self.publishers["/rosout_agg"] = self.master
+        self.subscribers["/rosout_agg"] = self.master
 
         """ set ip_address for reserved nodes """
 
-        self.nodes["/rosout"] = { self.master }
+        self.nodes["/rosout"] = self.master
 
         """ compute peer publishers for each subscriber IP addresses """
         topics = set( self.publishers.keys() + self.subscribers.keys() )
@@ -255,27 +298,16 @@ class ROSMasterAuth():
 
         """ set setters/getters for reserved parameters """
         for p in self.reserved_parameters:
-            self.setters[p] = {self.master}
+            self.setters[p] = self.master
             self.getters[p] = self.ip_addresses
         
-        self.logger.debug( "Master: %s" % self.master )
-        self.logger.debug( "Nodes:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.nodes.items() ) )
-        self.logger.debug( "Publishers:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.publishers.items() ) )
-        self.logger.debug( "Subscribers:\n%s" % "\n".join( "    %s: %s" % ( k, v ) for k, v in self.subscribers.items() ) )
-        self.logger.debug( "Peer publishers:\n%s" % "\n".join( "    %s: %s" % ( k, v ) for k, v in self.peer_publishers.items() ) )
-        self.logger.debug( "Parameter setters:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.setters.items() ) )
-        self.logger.debug( "Parameter getters:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.getters.items() ) )
-        self.logger.debug( "Service Providers:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.providers.items() ) )
-        self.logger.debug( "Service Requesters:\n%s" % "\n".join( "  %s: %s" % ( k, v ) for k, v in self.requesters.items() ) )
-        self.logger.debug( "IP addresses: %s" % self.ip_addresses )
-        self.logger.debug( "==" )
-
 
     def save( self, filename ):
         """ Write full authorization configuration to YAML file
         """
         data = OrderedDict()
-        data.update( {"master": self.master } )
+        data.update( {"master": list( self.master ) } )
+        data.update( {"aliases": { k: list( v ) for k, v in self.aliases.items() } } )
         data.update( {"nodes": { k: list( v ) for k, v in self.nodes.items() } } )
         data.update( {"publishers": { k: list( v ) for k, v in self.publishers.items() } } )
         data.update( {"subscribers": { k: list( v ) for k, v in self.subscribers.items() } } )
