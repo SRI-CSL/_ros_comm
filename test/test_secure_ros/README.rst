@@ -3,14 +3,26 @@ Test Secure ROS
 
 This package provides some tests for Secure ROS.
 
-Test Authorization 
-^^^^^^^^^^^^^^^^^^
+Requirements 
+^^^^^^^^^^^^
+::
+  sudo apt-get install python-pytest
+
+Test authorization configuration file
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This test will parse the authorization file and check for errors. 
 
 You may provide the authorization file as an argument or using the ``ROS_AUTH_FILE`` environment variable. ::
 
-  rosrun test_secure_ros test_autg
+  rosrun test_secure_ros test_config.py -a ros_auth.yaml
+
+Test authorization configuration file
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+This test checks authorization functions based on an example configuration file ``conf/test.yaml``. ::
+
+  python -m pytest test_parameters.py
+
 
 Test Self
 ^^^^^^^^^
