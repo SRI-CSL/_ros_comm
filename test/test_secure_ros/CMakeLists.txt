@@ -33,8 +33,7 @@ install(TARGETS talker2 listener2
 catkin_install_python( PROGRAMS 
   nodes/listener.py 
   nodes/talker.py 
-  nodes/xmlrpc.py 
-  nodes/test_authorization.py 
   nodes/rosxmlrpc.py 
+  nodes/test_config.py 
   nodes/test_self.py 
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
