@@ -325,7 +325,10 @@ class ROSMasterAuth():
 
 
     def check_key_ip_address( self, key, ip_address, auth_ip_addresses, query, fallback = False, prefix = False ):
-        """ Check if key is present in 
+        """ Check if ip_address is present in auth_ip_addresses[key]
+            If prefix == True check if ip_address is present in auth_ip_addresses[key2] where key2 is a parent of key
+            If there exists key2 which is a parent of 
+            The parents of /a/bc/def/g are /a/bc/def, /a/bc, /a (not /a/b or /a/bc/de)
         """
         if self.noverify == True:
             self.logger.debug( "%s( %s, %s ): %s (noverify = True)" % ( query, key, ip_address, True ) )
@@ -341,15 +344,21 @@ class ROSMasterAuth():
                             self.logger.debug( "%s( %s, %s ): %s (IP address not authorized)" % ( query, key, ip_address, "No" ) )
                             return False
                     if prefix and key.startswith( key2 ):
-                        if ip_address in val2:
-                            self.logger.debug( "%s( %s, %s ): %s (key prefix matches)" % ( query, key, ip_address, "OK" ) )
-                            return True
+                        comp = key.split( "/" )
+                        for i in range( 1, len( comp ) ):
+                            if key2 == "/".join( c for c in comp[0:i+1] ):
+                                if ip_address in val2:
+                                    self.logger.debug( "%s( %s, %s ): %s (key prefix matches)" % ( query, key, ip_address, "OK" ) )
+                                    return True
+                                else:
+                                    self.logger.warn( "%s( %s, %s ): %s (key prefix matches)" % ( query, key, ip_address, "No" ) )
+                                    return False
                 if fallback:
                     self.logger.debug( "%s( %s, %s ): %s (key not listed)" % ( query, key, ip_address, "OK" ) )
                 else:
-                    self.logger.debug( "%s( %s, %s ): %s (key not listed)" % ( query, key, ip_address, "No" ) )
+                    self.logger.warn( "%s( %s, %s ): %s (key not listed)" % ( query, key, ip_address, "No" ) )
                 return fallback 
-            self.logger.debug( "%s( %s, %s ): %s (unknown IP address)" % ( query, key, ip_address, "No" ) )
+            self.logger.warn( "%s( %s, %s ): %s (unknown IP address)" % ( query, key, ip_address, "No" ) )
             return False
         except:
             self.logger.error( "Error querying %s( %s, %s )" % ( query, key, ip_address ) )
