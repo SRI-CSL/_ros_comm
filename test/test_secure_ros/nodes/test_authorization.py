@@ -36,11 +36,18 @@
 """
 """
 
-from authorization import ROSMasterAuth
-import sys
+from rosmaster.authorization import ROSMasterAuth
+import argparse
+import os
 
 if __name__ == "__main__":
-  if len( sys.argv ) > 1:
-    auth = ROSMasterAuth( sys.argv[1] )
+  parser = argparse.ArgumentParser()
+  parser.add_argument( "--auth_file", "-a", type = str, default = os.environ.get( "ROS_AUTH_FILE" ), help="Authorization file" )
+  args = parser.parse_args()
+  if args.auth_file == "":
+    print( "Please specify ROS authorization file either using the -a option." )
+  elif os.path.exists( args.auth_file ):
+    print( "Loading %s" % args.auth_file )
+    auth = ROSMasterAuth( args.auth_file )
   else:
-    auth = ROSMasterAuth( )
+    print( "ROS authorization file (%s) does not exist!" % args.auth_file )
