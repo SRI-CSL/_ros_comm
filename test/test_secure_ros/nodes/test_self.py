@@ -67,16 +67,17 @@ def get_authorized( ip_addr, auth_file ):
       This is done outside the rosmaster.authorization module as an independent test
       (It uses rosmaster.authorization to parse the YAML file)
   """
+  print( "Checking authorization for %s" % ip_addr )
   auth_list = {}
-  auth = ROSMasterAuth( auth_file )
+  auth = ROSMasterAuth( auth_file, is_master = False )
   auth_file2 = "auth.yaml" 
   getLogger().info( "Saving authorization configuration to %s" % auth_file2 )
   auth.save( auth_file2 )
   auth_list["published_topics"] = set( t for (t,ip_set) in auth.publishers.items() if ip_addr in ip_set )
   auth_list["subscribed_topics"] = set( t for (t,ip_set) in auth.subscribers.items() if ip_addr in ip_set )
   auth_list["state"] = { }
-  auth_list["state"]["published_topics"] = set( t for (t,ip_set) in auth.publishers.items() if ip_addr in ip_set | {auth.master} )
-  auth_list["state"]["subscribed_topics"] = set( t for (t,ip_set) in auth.subscribers.items() if ip_addr in ip_set | {auth.master} )
+  auth_list["state"]["published_topics"] = set( t for (t,ip_set) in auth.publishers.items() if ip_addr in ip_set )
+  auth_list["state"]["subscribed_topics"] = set( t for (t,ip_set) in auth.subscribers.items() if ip_addr in ip_set )
   auth_list["state"]["published_topics"] -= {"/rosout_agg"}
 
   return auth_list

@@ -152,7 +152,7 @@ class ROSMasterAuth():
     reserved_topics = ["/rosout", "/rosout_agg"]
     reserved_nodes = ["/rosout"]
 
-    def __init__( self, config_file = "" ):
+    def __init__( self, config_file = "", is_master = True ):
         self.noverify = False
         self.master = set()
         self.aliases = dict()
@@ -169,12 +169,13 @@ class ROSMasterAuth():
         self.logger = getLogger()
 
         """ Set ROS master IP address """
-        if os.environ.has_key( "ROS_MASTER_URI" ):
-            self.master = set( uri_to_ip_address_list( os.environ.get( "ROS_MASTER_URI" ) ) )
-            self.master.update( resolve_ip_address( "localhost" ) )
-            self.logger.info( "Setting master from ROS_MASTER_URI: %s" % self.master )
-        else:
-            raise RuntimeError( "ROS_MASTER_URI environment variable not set" )
+        if is_master: 
+            if os.environ.has_key( "ROS_MASTER_URI" ):
+                self.master = set( uri_to_ip_address_list( os.environ.get( "ROS_MASTER_URI" ) ) )
+            else:
+                raise RuntimeError( "ROS_MASTER_URI environment variable not set" )
+        self.master.update( resolve_ip_address( "localhost" ) )
+        self.logger.info( "Setting master from ROS_MASTER_URI: %s" % self.master )
 
         """ ROS authorization configuration file is stored in environment variable """
         if config_file == "":
